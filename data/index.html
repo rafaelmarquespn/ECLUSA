@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eclusas</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f2f2f2;
+        }
+
+        form {
+            background-color: #fff;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        p {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        select,
+        input[type="number"],
+        input[type="button"] {
+            padding: 8px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        input[type="number"] {
+            width: 60px;
+        }
+
+        input[type="button"] {
+            cursor: pointer;
+            background-color: #4caf50;
+            color: #fff;
+            border: none;
+        }
+
+        input[type="button"]:hover {
+            background-color: #45a049;
+        }
+
+        span {
+            font-weight: bold;
+        }
+
+        a {
+            display: block;
+            margin-top: 20px;
+            text-decoration: none;
+            color: #007bff;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .relay-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .relay-buttons div {
+            margin-bottom: 20px;
+        }
+    </style>
+    <script>
+
+        function sendMotorRequest() {
+            const motor = document.getElementById('motorSelect').value;
+            const pwm = document.getElementById('pwmInput').value;
+            
+            fetch(`/control-motor?motor=${motor}&pwm=${pwm}`)
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('pwmValue').innerText = pwm;
+                    document.getElementById('motorValue').innerText = motor;
+                })
+                .catch(error => console.error('Erro:', error));
+        }
+
+        function controlRelay(relayNumber, action) {
+            fetch(`/relay?relay=${relayNumber}&action=${action}`)
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById(`relay${relayNumber}Status`).innerText = action;
+                })
+                .catch(error => console.error('Erro:', error));
+        }
+
+        function getWiFiAddress() {
+            setInterval(() => {
+                fetch('/wifi-status')
+                    .then(response => response.text())
+                    .then(data => {
+                    document.getElementById('wifiStatus').innerHTML = data;
+                    })
+                    .catch(error => console.error('Erro ao obter o status do WiFi:', error));
+                }, 2000); // Chama a função a cada 1 segundo (1000 milissegundos)
+        }
+
+        window.onload = getWiFiAddress;
+
+
+        
+    </script>
+</head>
+<body>
+    <!-- Formulário para controle de motor e PWM -->
+    <form>
+        <h2> Controle dos motores </h2>
+        <p>Selecione o Motor:</p>
+        <select id="motorSelect">
+            <option value="1">Motor 1</option>
+            <option value="2">Motor 2</option>
+            <option value="3">Motor 3</option>
+            <option value="4">Motor 4</option>
+        </select>
+
+        <p>Defina o valor de PWM (0 a 255):</p>
+        <input type="number" id="pwmInput" name="pwm" min="0" max="255">
+
+        <input type="button" value="Enviar" onclick="sendMotorRequest()">
+
+        <p>Motor selecionado: <span id="motorValue">1</span></p>
+        <p>Valor de PWM do Motor: <span id="pwmValue">0</span></p>
+    </form>
+
+    <!-- Área para controle dos 9 relés -->
+    <form>
+        <h2>Controle dos Relés</h2>
+        <div class="relay-buttons">
+            <div>
+                <p>Freio 1: <span id="relay2Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(2, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(2, 'OFF')">
+            </div>
+            <div>
+                <p>Freio 2: <span id="relay4Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(4, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(4, 'OFF')">
+            </div>
+            <div>
+                <p>Freio 3: <span id="relay5Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(5, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(5, 'OFF')">
+            </div>
+            <div>
+                <p>Freio 4: <span id="relay18Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(18, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(18, 'OFF')">
+            </div>
+            <div>
+                <p>Sentido 1: <span id="relay13Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(13, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(13, 'OFF')">
+            </div>
+            <div>
+                <p>Sentido 2: <span id="relay12Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(12, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(12, 'OFF')">
+            </div>
+            <div>
+                <p>Sentido 3: <span id="relay14Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(14, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(14, 'OFF')">
+            </div>
+            <div>
+                <p>Sentido 4: <span id="relay27Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(27, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(27, 'OFF')">
+            </div>
+            <div>
+                <p>Manta: <span id="relay26Status">OFF</span></p>
+                <input type="button" value="Ligar" onclick="controlRelay(26, 'ON')">
+                <input type="button" value="Desligar" onclick="controlRelay(26, 'OFF')">
+            </div>
+        </div>
+    </form>
+
+    <!-- Link para endereço de Wi-Fi -->
+    <form>
+        <div>
+            <h2>Status de Conexão Wi-Fi</h2>
+            <div id="wifiStatus">
+                <p>Carregando status do Wi-Fi...</p>
+            </div>
+            <a href="/WIFI">Configurar Wi-Fi</a>
+        </div>
+    </form>
+</body>
+</html>

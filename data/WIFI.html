@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configuração Wi-Fi</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 500px;
+      margin: 50px auto;
+      background-color: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input[type="text"], select, input[type="password"] {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      box-sizing: border-box;
+    }
+    select {
+      width: 72%;
+      display: inline-block;
+      margin-right: 5px;
+    }
+    input[type="submit"], button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 10px;
+      border: none;
+      cursor: pointer;
+      border-radius: 5px;
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+    input[type="submit"]:hover, button:hover {
+      background-color: #45a049;
+    }
+    button {
+      width: 25%;
+    }    
+    
+  </style>
+</head>
+<body>
+  <link rel="icon" href="data:,">
+  <div class="container">
+    <h2>Configuração Wi-Fi</h2>
+    <form id="configForm">
+      <label for="wifiSSID">Selecione a Rede Wi-Fi:</label>
+      <select id="wifiSSID" name="wifiSSID" required></select>
+      <button type="button" id="scanButton">Escanear WiFi</button><br>
+      <label for="wifiPassword">Senha da Rede Wi-Fi:</label>
+      <input type="password" id="wifiPassword" name="wifiPassword" required><br>
+      <input type="submit" value="Salvar">
+      <!-- Novo campo para receber o SSID da rede Wi-Fi -->
+      <label for="wifiSSIDInput">SSID da Rede Wi-Fi salva:</label>
+      <input type="text" id="wifiSSIDInput" name="wifiSSIDInput" required disabled><br>
+      <!-- Elemento para mostrar os valores dos sensores -->
+    </form>
+    <div id="wifiStatus"></div>
+  </div>
+
+  <script>
+    let wifiPassword=document.getElementById('wifiPassword');
+    let wifiSSIDInput= document.getElementById('wifiSSIDInput');
+  document.getElementById('scanButton').addEventListener('click', function scanWiFi() {
+      const scanButton = document.getElementById('scanButton');
+      scanButton.disabled = true; // Desabilita o botão enquanto estiver escaneando
+
+    // Altera a cor e o texto do botão para indicar que está escaneando
+    scanButton.style.backgroundColor = '#ff0000'; // Vermelho
+    scanButton.textContent = 'Procurando Redes...';
+  fetch('/scan') // Realiza o escaneamento WiFi
+    .then(response => response.text())
+    .then(data => {
+      const wifiSSIDSelect = document.getElementById('wifiSSID');
+      wifiSSIDSelect.innerHTML = ''; // Limpa as opções existentes
+      if (data === "nada") {
+        // Se não houver redes disponíveis, repete a operação após 2 segundos
+        setTimeout(scanWiFi, 4000);
+      } else {
+        const networks = data.split('\n');
+        networks.forEach(network => {
+          const option = document.createElement('option');
+          option.text = network;
+          wifiSSIDSelect.add(option);
+        });
+        scanButton.disabled = false;
+        scanButton.style.backgroundColor = '#4CAF50'; // Cor original
+        scanButton.textContent = 'Escanear WiFi';
+        }
+      })
+    .catch(error => console.error('Erro ao carregar redes WiFi:', error));
+    });
+    fetch('/config.json') // Altere o URL para corresponder ao local onde você hospedou o arquivo JSON
+      .then(response => response.json())
+      .then(data => {
+        wifiPassword.value = data.wifiPassword;
+        wifiSSIDInput.value = data.wifiSSID;
+        console.log(data);
+      })
+
+      .catch(error => console.error('Erro ao carregar configurações:', error));
+
+      document.getElementById("configForm").addEventListener("submit", async function(event) {
+      event.preventDefault();
+      var formData = new FormData(this);
+      var config = {};
+      formData.forEach((value, key) => {
+        config[key] = value;
+      });
+      console.log(config);
+      try {
+        const response = await fetch('/save-config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(config),
+        });
+        if (!response.ok) {
+          throw new Error('Erro ao salvar configurações');
+        }
+        alert('Configurações salvas com sucesso!');
+        console.log(config);
+      } catch (error) {
+        console.error('Erro ao salvar configurações:', error);
+        alert('Erro ao salvar configurações. Por favor, tente novamente.');
+      }
+    });
+
+    // Atualiza o status do WiFi
+    function updateWiFiStatus() {
+        setInterval(() => {
+          fetch('/wifi-status')
+            .then(response => response.text())
+            .then(data => {
+              document.getElementById('wifiStatus').innerHTML = data;
+            })
+            .catch(error => console.error('Erro ao obter o status do WiFi:', error));
+        }, 2000); // Chama a função a cada 1 segundo (1000 milissegundos)
+  }
+    // Chama a função para atualizar o status do WiFi
+    updateWiFiStatus();
+  </script>
+</body>
+</html>
