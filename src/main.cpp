@@ -14,18 +14,16 @@
 #define NUM_MOTORES 4
 
 //MAC Address do controle remoto
-uint8_t remoteMac[] = {0x24, 0x0A, 0xC4, 0x0A, 0x0B, 0x6C};
-
+char remoteMac[18] = "E8:6B:EA:D0:E4:F0";
 //MAC Address do leitor de sensores 08:D1:F9:27:B2:54
-uint8_t sensorMac[] = {0x81, 0xD1, 0xF9, 0x27, 0xB2, 0x54};
-
+char sensorMac[18] = "08:D1:F9:27:B2:54";
 
 const char *ssid = "Moto G (5) Plus 3746";
 const char *senha = "velorio_";
 WiFiClient espClient;
 boolean conectado = false;
 unsigned long tempo = 0;
-const int intervalo = 5000; 
+const int intervalo = 1000; 
 
 //modbus
 ModbusRTUSlave modbus(Serial2);
@@ -54,6 +52,15 @@ typedef struct struct_message {
 
 struct_message receivedData; // Struct para armazenar os dados recebidos
 
+
+typedef struct struct_remote_control {
+  int motorID;      // ID do motor (1-4)
+  int velocidade;   // PWM para controle de velocidade (0 a 255)
+  int sentido;      // Sentido do motor (0: Horário, 1: Anti-horário)
+} struct_remote_control;
+
+struct_remote_control remoteControl; // Struct para armazenar os dados do controle remoto
+
 // Arquivos e JSON
 String index_html;
 String arquivoConf;
@@ -72,6 +79,8 @@ void setupWiFi();
 void scanWiFiNetworks(AsyncWebServerRequest *request);
 void handleWiFiStatus(AsyncWebServerRequest *request);
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len); // ESP-NOW callback
+void pararMotorEFreio(int motorIndex);
+
 
 void setup() {
   // Configuração dos pinos dos motores e freios
@@ -166,10 +175,17 @@ void setup() {
 }
 
 void loop() {
-  // Se o Wi-Fi for desconectado, tenta reconectar a cada intervalo definido
-  if (WiFi.status() != WL_CONNECTED && millis() - tempo > intervalo) {
-    setupWiFi();
-    tempo = millis();
+  static int attemptCounter = 0;  // Variável para contar as tentativas de reconexão
+
+  // Se ainda não atingiu 20 tentativas
+  if (attemptCounter < 20) {
+    // Se o Wi-Fi estiver desconectado e for o momento de tentar reconectar
+    if (WiFi.status() != WL_CONNECTED && millis() - tempo > intervalo) {
+      setupWiFi();
+      tempo = millis();
+      attemptCounter++;  // Incrementa o contador de tentativas
+    }
+    Serial.println(attemptCounter);
   }
 
   // Processo do Modbus
@@ -177,6 +193,59 @@ void loop() {
   holdingRegisters[2] = random(0, 100); // Atualiza um valor aleatório para teste
 }
 
+// Função de callback para quando os dados forem recebidos via ESP-NOW
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  memcpy(&receivedData, incomingData, sizeof(receivedData)); // Copia os dados recebidos para a struct
+  Serial.print("Dados recebidos de: ");
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  Serial.println(macStr);
+  // Verifica se o último sensor aciona o critério de parada
+  if (!receivedData.sensorStatus[17]) {
+    pararMotorEFreio(0); // Exemplo, acionando o motor 1 como critério de parada
+    Serial.println("Critério de parada acionado pelo último sensor");
+  }
+
+  // Verifica o status dos sensores apenas se o MAC recebido for de sensor
+  if (!(macStr == sensorMac)) {
+    Serial.println("Status dos sensores:");
+    for (int i = 0; i < 18; i++) {
+      bool statusSensor = receivedData.sensorStatus[i];
+
+      // Definição de motor e freio associados a cada grupo de sensores
+      int motorIndex = (i / 4); // 4 sensores por motor (sensores 1-4 -> motor 0, 5-8 -> motor 1, etc.)
+
+      if (statusSensor) {
+        // Ativar motor correspondente
+        Serial.print("Sensor ");
+        Serial.print(i + 1);
+        Serial.print(" ativado, motor ");
+        Serial.print(motorIndex + 1);
+        Serial.println(" OK.");
+        switch (motorIndex) {
+          case 0: motor1_ok = true; break;
+          case 1: motor2_ok = true; break;
+          case 2: motor3_ok = true; break;
+          case 3: motor4_ok = true; break;
+        }
+      } else {
+        // Parar motor e ativar freio correspondente
+        pararMotorEFreio(motorIndex);
+        switch (motorIndex) {
+          case 0: motor1_ok = false; break;
+          case 1: motor2_ok = false; break;
+          case 2: motor3_ok = false; break;
+          case 3: motor4_ok = false; break;
+        }
+      }
+    }
+  }
+
+  // Verifique se o MAC é do dispositivo remoto
+  if (!(macStr == remoteMac)) {
+    // Ações específicas para o dispositivo remoto, se necessário
+  }
+}
 
 // Função para mudar o sentido dos motores 
 void mudaSentido(int motor, int sentido) {
@@ -202,29 +271,33 @@ void acionaMotor(int motor, int velocidade) {
     if (motor == 1 && motor1_ok) {
       int idx = motor - 1;
       digitalWrite(pinosFreios[idx], HIGH);
-      digitalWrite(pinosSentidos[idx], velocidade < 0 ? HIGH : LOW);
       ledcWrite(idx, velocidade);
     }
     if (motor == 2 && motor2_ok) {
       int idx = motor - 1;
       digitalWrite(pinosFreios[idx], HIGH);
-      digitalWrite(pinosSentidos[idx], velocidade < 0 ? HIGH : LOW);
       ledcWrite(idx, velocidade);
     }
     if (motor == 3 && motor3_ok) {
       int idx = motor - 1;
       digitalWrite(pinosFreios[idx], HIGH);
-      digitalWrite(pinosSentidos[idx], velocidade < 0 ? HIGH : LOW);
       ledcWrite(idx, velocidade);
     }
     if (motor == 4 && motor4_ok) {
       int idx = motor - 1;
       digitalWrite(pinosFreios[idx], HIGH);
-      digitalWrite(pinosSentidos[idx], velocidade < 0 ? HIGH : LOW);
       ledcWrite(idx, velocidade);
     }
 
   }
+}
+
+// Função para parar o motor e acionar o freio
+void pararMotorEFreio(int motorIndex) {
+  ledcWrite(motorIndex, 0);
+  digitalWrite(pinosFreios[motorIndex], LOW);
+  Serial.print("Critério de parada acionado para motor ");
+  Serial.println(motorIndex + 1);
 }
 
 // Configura todos os pinos
@@ -239,67 +312,6 @@ void setupPinos() {
   pinMode(manta, OUTPUT);
 }
 
-// Função de callback para quando os dados forem recebidos via ESP-NOW
-void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-
-  memcpy(&receivedData, incomingData, sizeof(receivedData)); // Copia os dados recebidos para a struct
-  Serial.print("Dados recebidos de: ");
-  char macStr[18];
-  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  Serial.println(macStr);
-  if (receivedData.sensorStatus[17] == false){
-  ledcWrite(0, 0);
-  digitalWrite(pinosFreios[0], LOW);
-  Serial.println("Critério de parada acionado");
-  }
-// Verifica o status dos sensores e aciona os motores e freios de acordo
-  if (memcmp(mac, sensorMac, 6) == 0){
-    for ( int i = 0; i < 18; i++)
-    {
-      switch (receivedData.sensorStatus[i]){
-        case true:
-          if (i == 1 || i == 2 || i == 3 || i == 4){
-            motor1_ok = true;
-          }
-          if (i == 5 || i == 6 || i == 7 || i == 8){
-            motor2_ok = true;
-          }
-          if (i == 9 || i == 10 || i == 11 || i == 12){
-            motor3_ok = true;
-          }
-          if (i == 13 || i == 14 || i == 15 || i == 16){
-            motor4_ok = true;
-          }
-        case false:
-          if (i == 1 || i == 2 || i == 3 || i == 4){
-            ledcWrite(0, 0);
-            digitalWrite(pinosFreios[0], LOW);
-            Serial.println("Critério de parada acionado");
-            motor1_ok = false;
-          }
-          if (i == 5 || i == 6 || i == 7 || i == 8){
-            ledcWrite(1, 0);
-            digitalWrite(pinosFreios[1], LOW);
-            Serial.println("Critério de parada acionado");
-          }
-          if (i == 9 || i == 10 || i == 11 || i == 12){
-            ledcWrite(2, 0);
-            digitalWrite(pinosFreios[2], LOW);
-            Serial.println("Critério de parada acionado");
-          }
-          if (i == 13 || i == 14 || i == 15 || i == 16){
-            ledcWrite(3, 0);
-            digitalWrite(pinosFreios[3], LOW);
-            Serial.println("Critério de parada acionado");
-          }
-        }
-      }
-    }
-
-  if (memcmp(mac, remoteMac, 6) == 0){
-
-  }
-}
 // Salva as configurações JSON
 void saveJson() {
   File configFile = LittleFS.open("/config.json", "w");
