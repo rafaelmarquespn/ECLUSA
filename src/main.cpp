@@ -8,23 +8,23 @@
 #include <AsyncJson.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <string.h> 
 
 // Definições e Variáveis Globais
 #define CHANNEL 0 // Canal ESP-NOW
 #define NUM_MOTORES 4
-
 //MAC Address do controle remoto
-char remoteMac[18] = "E8:6B:EA:D0:E4:F0";
+char remoteMac[18] = "E8:6B:EA:D0:C3:88";
 //MAC Address do leitor de sensores 08:D1:F9:27:B2:54
 char sensorMac[18] = "08:D1:F9:27:B2:54";
-
+// Wi-Fi
 const char *ssid = "Moto G (5) Plus 3746";
 const char *senha = "velorio_";
 WiFiClient espClient;
 boolean conectado = false;
 unsigned long tempo = 0;
 const int intervalo = 1000; 
-
+int attemptCounter = 0;
 //modbus
 ModbusRTUSlave modbus(Serial2);
 uint16_t holdingRegisters[6] = {0, 0, 0, 0, 0, 0};
@@ -32,43 +32,35 @@ bool coils[2];
 bool discreteInputs[2];
 const uint8_t coilPins[2] = {4, 5};
 const uint8_t discreteInputPins[2] = {2, 3};
-
 // Pinos dos motores e freios
 const int pinosMotores[NUM_MOTORES] = {23, 22, 21, 19};
 const int pinosFreios[NUM_MOTORES] = {2, 4, 5, 18};
 const int pinosSentidos[NUM_MOTORES] = {13, 12, 14, 27};
 const int manta = 26;
-
 // Variáveis de controle dos motores
 bool motor1_ok = false;
 bool motor2_ok = false;
 bool motor3_ok = false;
 bool motor4_ok = false;
-
 // ESP-NOW
 typedef struct struct_message {
   bool sensorStatus[18]; // Status ON/OFF de 18 sensores
 } struct_message;
 
 struct_message receivedData; // Struct para armazenar os dados recebidos
-
-
 typedef struct struct_remote_control {
   int motorID;      // ID do motor (1-4)
   int velocidade;   // PWM para controle de velocidade (0 a 255)
-  int sentido;      // Sentido do motor (0: Horário, 1: Anti-horário)
+  int sentido;
+  int brake;      // Sentido do motor (0: Horário, 1: Anti-horário)
 } struct_remote_control;
-
 struct_remote_control remoteControl; // Struct para armazenar os dados do controle remoto
-
 // Arquivos e JSON
 String index_html;
 String arquivoConf;
 DynamicJsonDocument doc(1024);
-
 // Servidor Web
 AsyncWebServer server(80);
-
 // Declaração de Funções
 void setupPinos();
 void acionaMotor(int motor, int velocidade);
@@ -80,6 +72,7 @@ void scanWiFiNetworks(AsyncWebServerRequest *request);
 void handleWiFiStatus(AsyncWebServerRequest *request);
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len); // ESP-NOW callback
 void pararMotorEFreio(int motorIndex);
+void mudaSentido(int motor, int sentido);
 
 
 void setup() {
@@ -98,7 +91,7 @@ void setup() {
   
   // Tentativa de conexão Wi-Fi por 10 segundos
   while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 10000) {
-    delay(500);
+    delay(50);
     Serial.print(".");
   }
 
@@ -175,8 +168,6 @@ void setup() {
 }
 
 void loop() {
-  static int attemptCounter = 0;  // Variável para contar as tentativas de reconexão
-
   // Se ainda não atingiu 20 tentativas
   if (attemptCounter < 20) {
     // Se o Wi-Fi estiver desconectado e for o momento de tentar reconectar
@@ -195,33 +186,23 @@ void loop() {
 
 // Função de callback para quando os dados forem recebidos via ESP-NOW
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-  memcpy(&receivedData, incomingData, sizeof(receivedData)); // Copia os dados recebidos para a struct
-  Serial.print("Dados recebidos de: ");
+  // Serial.print("Dados recebidos de: ");
   char macStr[18];
   snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  Serial.println(macStr);
-  // Verifica se o último sensor aciona o critério de parada
-  if (!receivedData.sensorStatus[17]) {
-    pararMotorEFreio(0); // Exemplo, acionando o motor 1 como critério de parada
-    Serial.println("Critério de parada acionado pelo último sensor");
-  }
-
-  // Verifica o status dos sensores apenas se o MAC recebido for de sensor
-  if (!(macStr == sensorMac)) {
-    Serial.println("Status dos sensores:");
+  // Serial.println(macStr);
+ // Verifica o status dos sensores apenas se o MAC recebido for de sensor
+  if ((strcmp(macStr, sensorMac) == 0)) {
+    memcpy(&receivedData, incomingData, sizeof(receivedData)); // Copia os dados recebidos para a struct
+    // Verifica se o último sensor aciona o critério de parada
+    // Serial.println("Status dos sensores:");
     for (int i = 0; i < 18; i++) {
       bool statusSensor = receivedData.sensorStatus[i];
-
+      // Serial.println("Sensor " + String(i) + ": " + String(statusSensor));
       // Definição de motor e freio associados a cada grupo de sensores
       int motorIndex = (i / 4); // 4 sensores por motor (sensores 1-4 -> motor 0, 5-8 -> motor 1, etc.)
 
-      if (statusSensor) {
-        // Ativar motor correspondente
-        Serial.print("Sensor ");
-        Serial.print(i + 1);
-        Serial.print(" ativado, motor ");
-        Serial.print(motorIndex + 1);
-        Serial.println(" OK.");
+      if (statusSensor == 1) {
+        //Ativar motor correspondente
         switch (motorIndex) {
           case 0: motor1_ok = true; break;
           case 1: motor2_ok = true; break;
@@ -231,6 +212,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
       } else {
         // Parar motor e ativar freio correspondente
         pararMotorEFreio(motorIndex);
+        Serial.println("Parando motor " + String(motorIndex) + " sensor " + String(i) + ": " + String(statusSensor) );
         switch (motorIndex) {
           case 0: motor1_ok = false; break;
           case 1: motor2_ok = false; break;
@@ -242,26 +224,37 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   }
 
   // Verifique se o MAC é do dispositivo remoto
-  if (!(macStr == remoteMac)) {
+  if ((strcmp(macStr, remoteMac) == 0)) {
     // Ações específicas para o dispositivo remoto, se necessário
+    Serial.println("Dados recebidos do controle remoto");
+    memcpy(&remoteControl, incomingData, sizeof(remoteControl)); // Copia os dados recebidos para a struct
+    Serial.println(remoteControl.motorID);
+    Serial.println(remoteControl.velocidade);
+    Serial.println(remoteControl.sentido);
+    if (remoteControl.motorID >= 1 && remoteControl.motorID <= NUM_MOTORES) {
+      Serial.println("Acionando motor");
+      mudaSentido(remoteControl.motorID, remoteControl.sentido);
+      acionaMotor(remoteControl.motorID, remoteControl.velocidade);
+    if(remoteControl.brake == 1){
+      int motorIndex = remoteControl.motorID - 1;
+      pararMotorEFreio(motorIndex);
+
+    }
+    }
   }
 }
 
-// Função para mudar o sentido dos motores 
+// Função para mudar o sentido dos motores
 void mudaSentido(int motor, int sentido) {
-  if (motor >= 1 && motor <= NUM_MOTORES) {
-    if (motor == 1) {
-      digitalWrite(pinosSentidos[0], sentido);
-    }
-    if (motor == 2) {
-      digitalWrite(pinosSentidos[1], sentido);
-    }
-    if (motor == 3) {
-      digitalWrite(pinosSentidos[2], sentido);
-    }
-    if (motor == 4) {
-      digitalWrite(pinosSentidos[3], sentido);
-    }
+  if (motor >= 1 && motor <= NUM_MOTORES && sentido == 0) {
+    int pino = pinosSentidos[motor - 1]; // Ajusta o índice do array
+    digitalWrite(pino, LOW);
+    Serial.println("Mudando sentido do motor " + String(motor) + " (pino " + String(pino) + ") para " + String(sentido));  
+
+  } else if (motor >= 1 && motor <= NUM_MOTORES && sentido == 1) {
+    int pino = pinosSentidos[motor -1]; // Ajusta o índice do array
+    digitalWrite(pino, HIGH);
+    Serial.println("Mudando sentido do motor " + String(motor) + " (pino " + String(pino) + ") para " + String(sentido));
   }
 }
 
@@ -296,8 +289,8 @@ void acionaMotor(int motor, int velocidade) {
 void pararMotorEFreio(int motorIndex) {
   ledcWrite(motorIndex, 0);
   digitalWrite(pinosFreios[motorIndex], LOW);
-  Serial.print("Critério de parada acionado para motor ");
-  Serial.println(motorIndex + 1);
+  // Serial.print("Critério de parada acionado para motor ");
+  // Serial.println(motorIndex + 1);
 }
 
 // Configura todos os pinos
@@ -305,6 +298,7 @@ void setupPinos() {
   for (int i = 0; i < NUM_MOTORES; i++) {
     pinMode(pinosMotores[i], OUTPUT);
     pinMode(pinosFreios[i], OUTPUT);
+    pinMode(pinosSentidos[i], OUTPUT);
     ledcSetup(i, 300, 8);
     ledcAttachPin(pinosMotores[i], i);
     ledcWrite(i, 0);
@@ -401,7 +395,7 @@ void setupWiFi() {
       WiFi.begin(ssid, senha);
       // Aguarda a conexão ao Wi-Fi
       while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
+        delay(50);
         Serial.print(".");
       }
       Serial.println("Conectado ao Wi-Fi");
@@ -451,3 +445,4 @@ void handleWiFiStatus(AsyncWebServerRequest *request) {
     request->send(200, "text/html", "<p style='color: red;'>Não conectado ao Wi-Fi.</p>");
   }
 }
+
